@@ -26,7 +26,15 @@ def train(batch_size: int=64,
           checkpoint_path: str=None):
     set_seed(random.randint(0, 2**32-1)) if seed == -1 else set_seed(seed)
 
-    train_dataset = datasets.MNIST(root='./data', train=True, download=False,transform=transforms.ToTensor())
+    train_dataset = datasets.MNIST(
+        root='./data',
+        train=True,
+        download=True,
+        transform=transforms.Compose([  # /**/
+            transforms.ToTensor(),  # /**/
+            transforms.Normalize((0.5,), (0.5,))  # /**/
+        ])  # /**/
+    )
     #sub_dataset = Subset(train_dataset, list(range(1024)))
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, drop_last=True, num_workers=4)
 
@@ -89,12 +97,14 @@ def inference(checkpoint_path: str=None,
                 if t[0] in times:
                     images.append(z)
                 e = torch.randn(1, 1, 32, 32)
-                z = z + (e*torch.sqrt(scheduler.beta[t]))
+                variance = scheduler.beta_tilde[t]  # /**/
+                z = z + (e*torch.sqrt(variance))  # /**/
             temp = scheduler.beta[0]/( (torch.sqrt(1-scheduler.alpha[0]))*(torch.sqrt(1-scheduler.beta[0])) )
             x = (1/(torch.sqrt(1-scheduler.beta[0])))*z - (temp*model(z.cuda(),[0]).cpu())
 
             images.append(x)
             x = rearrange(x.squeeze(0), 'c h w -> h w c').detach()
+            x = (x.clamp(-1, 1) + 1) / 2  # /**/
             x = x.numpy()
             plt.imshow(x)
             plt.show()
@@ -106,6 +116,7 @@ def display_reverse(images: List):
     for i, ax in enumerate(axes.flat):
         x = images[i].squeeze(0)
         x = rearrange(x, 'c h w -> h w c')
+        x = (x.clamp(-1, 1) + 1) / 2  # /**/
         x = x.numpy()
         ax.imshow(x)
         ax.axis('off')

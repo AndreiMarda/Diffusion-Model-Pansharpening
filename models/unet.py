@@ -9,18 +9,19 @@ import pdb
 from torch import device
 
 class ResBlock(nn.Module):
-    def __init__(self, C: int, num_groups: int, dropout_prob: float):
+    def __init__(self, C: int, num_groups: int, dropout_prob: float, time_embed_dim: int):  # /**/
         super().__init__()
         self.relu = nn.ReLU(inplace=True)
         self.gnorm1 = nn.GroupNorm(num_groups=num_groups, num_channels=C)
         self.gnorm2 = nn.GroupNorm(num_groups=num_groups, num_channels=C)
         self.conv1 = nn.Conv2d(C, C, kernel_size=3, padding=1)
         self.conv2 = nn.Conv2d(C, C, kernel_size=3, padding=1)
+        self.time_proj = nn.Linear(time_embed_dim, C)  # /**/
         self.dropout = nn.Dropout(p=dropout_prob, inplace=True)
 
     def forward(self, x, embeddings):
-        x = x + embeddings[:, :x.shape[1], :, :]
         r = self.conv1(self.relu(self.gnorm1(x)))
+        r = r + self.time_proj(embeddings)[:, :, None, None]  # /**/
         r = self.dropout(r)
         r = self.conv2(self.relu(self.gnorm2(r)))
         return r + x
@@ -51,10 +52,11 @@ class UnetLayer(nn.Module):
             num_groups: int, 
             dropout_prob: float,
             num_heads: int,
-            C: int):
+            C: int,
+            time_embed_dim: int):  # /**/
         super().__init__()
-        self.ResBlock1 = ResBlock(C=C, num_groups=num_groups, dropout_prob=dropout_prob)
-        self.ResBlock2 = ResBlock(C=C, num_groups=num_groups, dropout_prob=dropout_prob)
+        self.ResBlock1 = ResBlock(C=C, num_groups=num_groups, dropout_prob=dropout_prob, time_embed_dim=time_embed_dim)  # /**/
+        self.ResBlock2 = ResBlock(C=C, num_groups=num_groups, dropout_prob=dropout_prob, time_embed_dim=time_embed_dim)  # /**/
         if upscale:
             self.conv = nn.ConvTranspose2d(C, C//2, kernel_size=4, stride=2, padding=1)
         else:
@@ -80,8 +82,7 @@ class SinusoidalEmbeddings(nn.Module):
         self.embeddings = embeddings.to(device)
 
     def forward(self, t):
-        embeds = self.embeddings[t]
-        return embeds[:, :, None, None]
+        return self.embeddings[t]  # /**/
 
 class UNET(nn.Module):
     def __init__(self,
@@ -102,7 +103,13 @@ class UNET(nn.Module):
         self.late_conv = nn.Conv2d(out_channels, out_channels//2, kernel_size=3, padding=1)
         self.output_conv = nn.Conv2d(out_channels//2, output_channels, kernel_size=1)
         self.relu = nn.ReLU(inplace=True)
-        self.embeddings = SinusoidalEmbeddings(time_steps=time_steps, embed_dim=max(Channels), device=device)
+        time_embed_dim = max(Channels)  # /**/
+        self.embeddings = SinusoidalEmbeddings(time_steps=time_steps, embed_dim=time_embed_dim, device=device)  # /**/
+        self.time_mlp = nn.Sequential(  # /**/
+            nn.Linear(time_embed_dim, time_embed_dim * 4),  # /**/
+            nn.ReLU(inplace=True),  # /**/
+            nn.Linear(time_embed_dim * 4, time_embed_dim * 4),  # /**/
+        )  # /**/
         for i in range(self.num_layers):
             layer = UnetLayer(
                 upscale=Upscales[i],
@@ -110,16 +117,17 @@ class UNET(nn.Module):
                 num_groups=num_groups,
                 dropout_prob=dropout_prob,
                 C=Channels[i],
-                num_heads=num_heads
+                num_heads=num_heads,
+                time_embed_dim=time_embed_dim * 4  # /**/
             )
             setattr(self, f'Layer{i+1}', layer)
 
     def forward(self, x, t):
         x = self.shallow_conv(x)
+        embeddings = self.time_mlp(self.embeddings(t))  # /**/
         residuals = []
         for i in range(self.num_layers//2):
             layer = getattr(self, f'Layer{i+1}')
-            embeddings = self.embeddings(t)
             x, r = layer(x, embeddings)
             residuals.append(r)
         for i in range(self.num_layers//2, self.num_layers):
