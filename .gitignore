@@ -16,3 +16,4 @@ checkpoints/
 *.ckpt
 *.pt
 *.pth
+dataset/
