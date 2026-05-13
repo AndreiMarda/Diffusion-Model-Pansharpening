@@ -1,3 +1,6 @@
+import time
+from pathlib import Path
+
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
@@ -229,26 +232,82 @@ def print_metrics(prefix, metrics):
     print(f"{prefix} | {values}")
 
 
+def save_checkpoint(
+    checkpoint_dir,
+    epoch,
+    model_parts,
+    optimizer,
+    train_metrics,
+    validation_metrics,
+    config,
+):
+    spatial_unet, spectral_unet, gated_fusion_pyramid, denoiser = model_parts
+    checkpoint_dir = Path(checkpoint_dir)
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+    checkpoint = {
+        "epoch": epoch,
+        "spatial_unet": spatial_unet.state_dict(),
+        "spectral_unet": spectral_unet.state_dict(),
+        "gated_fusion_pyramid": gated_fusion_pyramid.state_dict(),
+        "denoiser": denoiser.state_dict(),
+        "optimizer": optimizer.state_dict(),
+        "train_metrics": train_metrics,
+        "validation_metrics": validation_metrics,
+        "config": config,
+    }
+
+    checkpoint_path = checkpoint_dir / f"checkpoint_epoch_{epoch:04d}.pth"
+    torch.save(checkpoint, checkpoint_path)
+    print(f"Saved checkpoint: {checkpoint_path}")
+
+
+def format_duration(seconds):
+    total_seconds = int(round(seconds))
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+
+    if hours:
+        return f"{hours}h {minutes}m {seconds}s"
+    if minutes:
+        return f"{minutes}m {seconds}s"
+    return f"{seconds}s"
+
+
 def main():
     set_seed(42)
 
     dataset_name = "gf2"
     batch_size = 8
     # ideal num_epochs = 100
-    num_epochs = 20
+    num_epochs = 25
     # ideal num_time_steps = 1000; 100 for debugging/testing
     num_time_steps = 100
     feature_channels = (32, 64, 128)
     learning_rate = 2e-4
     # ideal train_batches = None
-    max_train_batches = 1
-    # idieal valid batches = 4
+    max_train_batches = None
+    # ideal valid batches = 4
     max_validation_batches = 2
     # ideal test_batches = None
     max_test_batches = 1
     sampling_num_time_steps = num_time_steps
     sample_dir = "workflow_samples"
+    checkpoint_dir = "checkpoints"
+    checkpoint_interval = 5
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    config = {
+        "dataset_name": dataset_name,
+        "batch_size": batch_size,
+        "num_epochs": num_epochs,
+        "num_time_steps": num_time_steps,
+        "feature_channels": feature_channels,
+        "learning_rate": learning_rate,
+        "max_train_batches": max_train_batches,
+        "max_validation_batches": max_validation_batches,
+        "max_test_batches": max_test_batches,
+        "sampling_num_time_steps": sampling_num_time_steps,
+    }
 
     train_loader = create_train_loader(
         training_dir="dataset/training",
@@ -299,6 +358,8 @@ def main():
         weight_decay=1e-4,
     )
 
+    training_started_at = time.perf_counter()
+
     for epoch in range(num_epochs):
         train_metrics = train_one_epoch(
             train_loader=train_loader,
@@ -319,19 +380,38 @@ def main():
             max_batches=max_validation_batches,
             sample_dir=sample_dir,
         )
-        test_metrics = test_one_epoch(
-            test_loader=test_loader,
-            scheduler=sampling_scheduler,
-            num_time_steps=sampling_num_time_steps,
-            device=device,
-            model_parts=model_parts,
-            max_batches=max_test_batches,
-            sample_dir=sample_dir,
-        )
 
         print_metrics(f"Epoch {epoch + 1}/{num_epochs} train", train_metrics)
         print_metrics(f"Epoch {epoch + 1}/{num_epochs} valid", validation_metrics)
-        print_metrics(f"Epoch {epoch + 1}/{num_epochs} test", test_metrics)
+
+        current_epoch = epoch + 1
+        if current_epoch % checkpoint_interval == 0:
+            save_checkpoint(
+                checkpoint_dir=checkpoint_dir,
+                epoch=current_epoch,
+                model_parts=model_parts,
+                optimizer=optimizer,
+                train_metrics=train_metrics,
+                validation_metrics=validation_metrics,
+                config=config,
+            )
+
+    test_metrics = test_one_epoch(
+        test_loader=test_loader,
+        scheduler=sampling_scheduler,
+        num_time_steps=sampling_num_time_steps,
+        device=device,
+        model_parts=model_parts,
+        max_batches=max_test_batches,
+        sample_dir=sample_dir,
+    )
+    print_metrics(f"Testing metrics", test_metrics)
+
+    if device.type == "cuda":
+        torch.cuda.synchronize()
+
+    training_duration = time.perf_counter() - training_started_at
+    print(f"Training lasted {format_duration(training_duration)}.")
 
 
 if __name__ == "__main__":
