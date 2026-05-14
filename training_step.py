@@ -104,14 +104,12 @@ def compute_conditioned_losses(
     eps_pred = denoiser(x_t, t, cond)
 
     # Phase 8: Main diffusion loss.
-    loss_noise = F.mse_loss(eps_pred, noise)
+    loss = F.mse_loss(eps_pred, noise)
 
     # Phase 9: Reconstruct HRMS for a simple validation metric.
     residual_pred = predict_x0_from_eps(x_t, t, eps_pred, scheduler)
     hrms_pred = ms_up + residual_pred
     recon_l1 = F.l1_loss(hrms_pred, gt)
-
-    loss = loss_noise
 
     return {
         **diffusion_batch,
@@ -121,9 +119,8 @@ def compute_conditioned_losses(
         "eps_pred": eps_pred,
         "residual_pred": residual_pred,
         "hrms_pred": hrms_pred,
-        "loss_noise": loss_noise,
-        "recon_l1": recon_l1,
         "loss": loss,
+        "recon_l1": recon_l1
     }
 
 

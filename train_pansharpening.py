@@ -108,7 +108,7 @@ def train_one_epoch(
     spatial_unet, spectral_unet, gated_fusion_pyramid, denoiser = model_parts
     model_parts_train(model_parts)
 
-    totals = {key: 0.0 for key in ("loss", "loss_noise", "recon_l1")}
+    totals = {key: 0.0 for key in ("loss", "recon_l1")}
     batch_count = 0
 
     for batch_index, batch in enumerate(train_loader):
