@@ -6,12 +6,14 @@ import torch.nn.functional as F
 import torch.optim as optim
 
 from data_loading import create_test_loader, create_train_loader, create_validation_loader
-from metrics import qnr_metrics
+from metrics import qnr_metrics, reference_metrics
 from models.conditioning import GatedFusionPyramid, UNetFeatureExtractor
 from models.ddpm_unet import ConditionalDDPMUNet
 from models.utils import DDPM_Scheduler, set_seed
 from training_step import run_training_step, run_validation_step, sample_hrms
 from visualization import save_workflow_samples
+
+REFERENCE_METRIC_KEYS = ("psnr", "ssim", "scc", "sam", "ergas")
 
 # def inspect_loader_range(loader, name, num_batches=3):
 #     print(f"\n{name} range check")
@@ -76,8 +78,6 @@ def average_metric_totals(totals, count):
 
 def update_test_metric_totals(totals, outputs, batch, device):
     hrms_pred = outputs["hrms_pred"]
-    totals["pred_mean"] += hrms_pred.mean().item()
-    totals["pred_std"] += hrms_pred.std().item()
 
     lms_value = None
     if "lms" in batch:
@@ -146,7 +146,7 @@ def validate_one_epoch(
     spatial_unet, spectral_unet, gated_fusion_pyramid, denoiser = model_parts
     model_parts_eval(model_parts)
 
-    totals = {key: 0.0 for key in ("recon_l1", "psnr")}
+    totals = {key: 0.0 for key in ("recon_l1", *REFERENCE_METRIC_KEYS)}
     batch_count = 0
 
     for batch_index, batch in enumerate(validation_loader):
@@ -187,8 +187,6 @@ def test_one_epoch(
         "qnr": 0.0,
         "d_lambda": 0.0,
         "d_s": 0.0,
-        "pred_mean": 0.0,
-        "pred_std": 0.0,
     }
     lms_total = 0.0
     lms_count = 0

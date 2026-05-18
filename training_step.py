@@ -8,7 +8,7 @@ from diffusion import (
     reverse_diffusion_sample,
     sample_timesteps,
 )
-from metrics import psnr
+from metrics import reference_metrics
 
 
 def prepare_forward_diffusion_batch(batch, scheduler, num_time_steps, device):
@@ -167,7 +167,7 @@ def run_validation_step(
     gt = batch["gt"].to(device)
     outputs["gt"] = gt
     outputs["recon_l1"] = F.l1_loss(outputs["hrms_pred"], gt)
-    outputs["psnr"] = psnr(outputs["hrms_pred"], gt)
+    outputs.update(reference_metrics(outputs["hrms_pred"], gt))
 
     return detach_training_outputs(outputs)
 
