@@ -16,7 +16,14 @@ class PanCollectionDataset(Dataset):
     gt:  B x C x H x W
     """
 
-    def __init__(self, h5_paths, has_gt=True, normalize=True, max_value=1023.0):
+    def __init__(
+        self,
+        h5_paths,
+        has_gt=True,
+        normalize=True,
+        max_value=1023.0,
+        augment=False,
+    ):
         if isinstance(h5_paths, (str, Path)):
             h5_paths = [h5_paths]
 
@@ -24,6 +31,7 @@ class PanCollectionDataset(Dataset):
         self.has_gt = has_gt
         self.normalize = normalize
         self.max_value = float(max_value)
+        self.augment = augment
         if not self.h5_paths:
             raise ValueError("At least one H5 file is required.")
 
@@ -86,6 +94,9 @@ class PanCollectionDataset(Dataset):
         if "lms" in f:
             sample["lms"] = torch.from_numpy(f["lms"][local_index]).float()
 
+        if self.augment:
+            sample = self.augment_sample(sample)
+
         if self.normalize:
             for key in sample:
                 sample[key] = self.normalize_image(sample[key])
@@ -102,6 +113,38 @@ class PanCollectionDataset(Dataset):
         x = x.clamp(0.0, 1.0)
         x = 2.0 * x - 1.0
         return x
+
+    def augment_sample(self, sample):
+        # Apply the same geometric transform to PAN, MS, LMS, and GT.
+        if torch.rand(()) < 0.5:
+            sample = {
+                key: torch.flip(value, dims=(-1,))
+                for key, value in sample.items()
+            }
+
+        if torch.rand(()) < 0.5:
+            sample = {
+                key: torch.flip(value, dims=(-2,))
+                for key, value in sample.items()
+            }
+
+        can_rotate_90 = all(
+            value.shape[-2] == value.shape[-1]
+            for value in sample.values()
+        )
+        if can_rotate_90:
+            k = int(torch.randint(0, 4, ()).item())
+        else:
+            k = int(torch.randint(0, 2, ()).item()) * 2
+
+        if k:
+            sample = {
+                key: torch.rot90(value, k=k, dims=(-2, -1))
+                for key, value in sample.items()
+            }
+
+        return sample
+
 
 def get_split_h5_paths(split_dir, dataset_name="gf2", prefix="train"):
     split_dir = Path(split_dir)
@@ -137,12 +180,14 @@ def create_loader(
     has_gt=True,
     normalize=True,
     max_value=1023.0,
+    augment=False,
 ):
     dataset = PanCollectionDataset(
         h5_paths,
         has_gt=has_gt,
         normalize=normalize,
         max_value=max_value,
+        augment=augment,
     )
 
     if pin_memory is None:
@@ -167,7 +212,8 @@ def create_train_loader(
     num_workers=0,
     pin_memory=None,
     normalize=True,
-    max_value=1023.0
+    max_value=1023.0,
+    augment=True,
 ):
     h5_paths = get_training_h5_paths(training_dir, dataset_name)
     return create_loader(
@@ -178,7 +224,8 @@ def create_train_loader(
         num_workers=num_workers,
         pin_memory=pin_memory,
         normalize=normalize,
-        max_value=max_value
+        max_value=max_value,
+        augment=augment,
     )
 
 

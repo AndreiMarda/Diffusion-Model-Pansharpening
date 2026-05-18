@@ -12,13 +12,13 @@ def sample_timesteps(batch_size, num_time_steps, device):
 
 
 def q_sample(x_start, t, noise, scheduler):
-    alpha_bar_t = scheduler.alpha.to(x_start.device)[t].view(-1, 1, 1, 1)
+    alpha_bar_t = scheduler.alpha_bar.to(x_start.device)[t].view(-1, 1, 1, 1)
     return torch.sqrt(alpha_bar_t) * x_start + torch.sqrt(1.0 - alpha_bar_t) * noise
 
 
 # this estimates the clean image x0 from the noisy image xt, and predicted noise
 def predict_x0_from_eps(x_t, t, eps_pred, scheduler):
-    alpha_bar_t = scheduler.alpha.to(x_t.device)[t].view(-1, 1, 1, 1)
+    alpha_bar_t = scheduler.alpha_bar.to(x_t.device)[t].view(-1, 1, 1, 1)
     return (x_t - torch.sqrt(1.0 - alpha_bar_t) * eps_pred) / torch.sqrt(alpha_bar_t)
 
 

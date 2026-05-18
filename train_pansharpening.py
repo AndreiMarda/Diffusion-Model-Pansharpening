@@ -279,22 +279,23 @@ def main():
 
     dataset_name = "gf2"
     batch_size = 8
-    # ideal num_epochs = 100
-    num_epochs = 25
-    # ideal num_time_steps = 1000; 100 for debugging/testing
+
+    num_epochs = 5
+
     num_time_steps = 100
+    sampling_num_time_steps = num_time_steps
+
     feature_channels = (32, 64, 128)
     learning_rate = 2e-4
-    # ideal train_batches = None
+
     max_train_batches = None
-    # ideal valid batches = 4
-    max_validation_batches = 2
-    # ideal test_batches = None
-    max_test_batches = 1
-    sampling_num_time_steps = num_time_steps
+    max_validation_batches = None
+    max_test_batches = None
+
     sample_dir = "workflow_samples"
     checkpoint_dir = "checkpoints"
     checkpoint_interval = 5
+    train_augmentation = True
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     config = {
         "dataset_name": dataset_name,
@@ -307,6 +308,7 @@ def main():
         "max_validation_batches": max_validation_batches,
         "max_test_batches": max_test_batches,
         "sampling_num_time_steps": sampling_num_time_steps,
+        "train_augmentation": train_augmentation,
     }
 
     train_loader = create_train_loader(
@@ -316,6 +318,7 @@ def main():
         shuffle=True,
         drop_last=True,
         num_workers=0,
+        augment=train_augmentation,
     )
     validation_loader = create_validation_loader(
         validation_dir="dataset/validation",

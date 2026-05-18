@@ -16,8 +16,11 @@ def prepare_forward_diffusion_batch(batch, scheduler, num_time_steps, device):
     ms = batch["ms"].to(device)
     gt = batch["gt"].to(device)
 
-    # Phase 1: Upsample MS to PAN/GT resolution.
-    ms_up = bicubic_upsample(ms, size=pan.shape[-2:])
+    # Phase 1: Use dataset LMS when available, otherwise upsample MS to PAN/GT resolution.
+    if "lms" in batch:
+        ms_up = batch["lms"].to(device)
+    else:
+        ms_up = bicubic_upsample(ms, size=pan.shape[-2:])
 
     if ms_up.shape != gt.shape:
         raise ValueError(f"ms_up shape {ms_up.shape} does not match gt shape {gt.shape}")

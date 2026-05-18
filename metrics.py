@@ -5,7 +5,7 @@ import torch.nn.functional as F
 # d_s Spatial Divergence (how well a pansharpened image preserves the spatial characteristics, from the PAN)
 # QNR = (1 - d_lambda) * (1 - d_s)
 
-def psnr(pred, target, data_range=1.0, eps=1e-8):
+def psnr(pred, target, data_range=2.0, eps=1e-8):
     mse = F.mse_loss(pred, target)
     return 10.0 * torch.log10(
         torch.tensor(data_range ** 2, device=pred.device, dtype=pred.dtype)
