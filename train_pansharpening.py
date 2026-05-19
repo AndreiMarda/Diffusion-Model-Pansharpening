@@ -1,3 +1,4 @@
+import csv
 import time
 from pathlib import Path
 
@@ -14,6 +15,11 @@ from training_step import run_training_step, run_validation_step, sample_hrms
 from visualization import save_workflow_samples
 
 REFERENCE_METRIC_KEYS = ("psnr", "ssim", "scc", "sam", "ergas")
+TRAINING_DATASETS = (
+    {"name": "gf2", "test_datasets": ("gf2",)},
+    {"name": "qb", "test_datasets": ("qb",)},
+    {"name": "wv3", "test_datasets": ("wv3", "wv2")},
+)
 
 # def inspect_loader_range(loader, name, num_batches=3):
 #     print(f"\n{name} range check")
@@ -127,8 +133,8 @@ def train_one_epoch(
             optimizer=optimizer,
         )
         update_metric_totals(totals, outputs)
-        if sample_dir is not None and batch_index == 0:
-            save_workflow_samples(outputs, sample_dir, "train")
+        if sample_dir is not None:
+            save_batch_workflow_samples(outputs, sample_dir, "train", batch_index)
         batch_count += 1
 
     return average_metric_totals(totals, batch_count)
@@ -164,8 +170,8 @@ def validate_one_epoch(
             denoiser=denoiser,
         )
         update_metric_totals(totals, outputs)
-        if sample_dir is not None and batch_index == 0:
-            save_workflow_samples(outputs, sample_dir, "valid")
+        if sample_dir is not None:
+            save_batch_workflow_samples(outputs, sample_dir, "valid", batch_index)
         batch_count += 1
 
     return average_metric_totals(totals, batch_count)
@@ -213,8 +219,8 @@ def test_one_epoch(
                 lms_total += lms_value
                 lms_count += 1
 
-            if sample_dir is not None and batch_index == 0:
-                save_workflow_samples(outputs, sample_dir, "test")
+            if sample_dir is not None:
+                save_batch_workflow_samples(outputs, sample_dir, "test", batch_index)
 
             batch_count += 1
 
@@ -228,6 +234,21 @@ def test_one_epoch(
 def print_metrics(prefix, metrics):
     values = " | ".join(f"{key}: {value:.6f}" for key, value in metrics.items())
     print(f"{prefix} | {values}")
+
+
+def save_batch_workflow_samples(outputs, sample_dir, split_name, batch_index):
+    if sample_dir is None:
+        return
+
+    batch_size = outputs["pan"].shape[0]
+    for sample_index in range(batch_size):
+        prefix = f"{split_name}_batch_{batch_index:04d}_sample_{sample_index:02d}"
+        save_workflow_samples(
+            outputs=outputs,
+            output_dir=sample_dir,
+            prefix=prefix,
+            sample_index=sample_index,
+        )
 
 
 def save_checkpoint(
@@ -272,80 +293,127 @@ def format_duration(seconds):
     return f"{seconds}s"
 
 
-def main():
-    set_seed(42)
-
-    dataset_name = "gf2"
-    batch_size = 8
-
-    num_epochs = 5
-
-    num_time_steps = 100
-    sampling_num_time_steps = num_time_steps
-
-    feature_channels = (32, 64, 128)
-    learning_rate = 2e-4
-
-    max_train_batches = None
-    max_validation_batches = None
-    max_test_batches = None
-
-    sample_dir = "workflow_samples"
-    checkpoint_dir = "checkpoints"
-    checkpoint_interval = 5
-    train_augmentation = True
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    config = {
-        "dataset_name": dataset_name,
-        "batch_size": batch_size,
-        "num_epochs": num_epochs,
-        "num_time_steps": num_time_steps,
-        "feature_channels": feature_channels,
-        "learning_rate": learning_rate,
-        "max_train_batches": max_train_batches,
-        "max_validation_batches": max_validation_batches,
-        "max_test_batches": max_test_batches,
-        "sampling_num_time_steps": sampling_num_time_steps,
-        "train_augmentation": train_augmentation,
+def add_metrics_row(rows, train_dataset, eval_dataset, phase, epoch, metrics):
+    row = {
+        "train_dataset": train_dataset,
+        "eval_dataset": eval_dataset,
+        "phase": phase,
+        "epoch": epoch,
     }
+    row.update(metrics)
+    rows.append(row)
+
+
+def write_metrics_table(rows, output_path):
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    metric_keys = sorted(
+        {
+            key
+            for row in rows
+            for key in row
+            if key not in {"train_dataset", "eval_dataset", "phase", "epoch"}
+        }
+    )
+    fieldnames = ["train_dataset", "eval_dataset", "phase", "epoch", *metric_keys]
+
+    with output_path.open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
+
+    print(f"Saved metrics table: {output_path}")
+
+
+def print_results_table(rows, title):
+    metric_keys = sorted(
+        {
+            key
+            for row in rows
+            for key in row
+            if key not in {"train_dataset", "eval_dataset", "phase", "epoch"}
+        }
+    )
+    columns = ["train_dataset", "eval_dataset", "phase", "epoch", *metric_keys]
+
+    print(f"\n{title}")
+    print(" | ".join(columns))
+    print(" | ".join("---" for _ in columns))
+    for row in rows:
+        values = []
+        for column in columns:
+            value = row.get(column, "")
+            if isinstance(value, float):
+                value = f"{value:.6f}"
+            values.append(str(value))
+        print(" | ".join(values))
+
+
+def verify_required_datasets(training_datasets, training_dir, validation_dir, testing_dir):
+    missing = []
+    for experiment in training_datasets:
+        dataset_name = experiment["name"]
+        required_files = [
+            Path(training_dir) / f"train_{dataset_name}.h5",
+            Path(validation_dir) / f"valid_{dataset_name}.h5",
+        ]
+
+        for test_dataset_name in experiment["test_datasets"]:
+            required_files.append(Path(testing_dir) / test_dataset_name / "Full")
+
+        for path in required_files:
+            if path.is_dir():
+                if not list(path.glob("*.h5")):
+                    missing.append(f"{path}/*.h5")
+            elif not path.exists():
+                missing.append(str(path))
+
+    if missing:
+        missing_lines = "\n".join(f"  - {path}" for path in missing)
+        raise FileNotFoundError(
+            "Cannot start the full multi-dataset run because required data is missing:\n"
+            f"{missing_lines}"
+        )
+
+
+def run_dataset_experiment(experiment, base_config, device):
+    dataset_name = experiment["name"]
+    print(f"\nStarting experiment for training dataset: {dataset_name}")
+
+    config = {**base_config, "dataset_name": dataset_name}
+    checkpoint_dir = Path(base_config["checkpoint_dir"]) / dataset_name
+    sample_root = Path(base_config["sample_dir"]) / dataset_name
+    results_dir = Path(base_config["results_dir"]) / dataset_name
 
     train_loader = create_train_loader(
-        training_dir="dataset/training",
+        training_dir=base_config["training_dir"],
         dataset_name=dataset_name,
-        batch_size=batch_size,
+        batch_size=base_config["batch_size"],
         shuffle=True,
         drop_last=True,
-        num_workers=0,
-        augment=train_augmentation,
+        num_workers=base_config["num_workers"],
+        augment=base_config["train_augmentation"],
     )
     validation_loader = create_validation_loader(
-        validation_dir="dataset/validation",
+        validation_dir=base_config["validation_dir"],
         dataset_name=dataset_name,
-        batch_size=batch_size,
+        batch_size=base_config["batch_size"],
         shuffle=False,
         drop_last=False,
-        num_workers=0,
-    )
-    test_loader = create_test_loader(
-        testing_dir="dataset/testing",
-        dataset_name=dataset_name,
-        batch_size=1,
-        shuffle=False,
-        num_workers=0,
+        num_workers=base_config["num_workers"],
     )
 
-    # inspect_loader_range(train_loader, "train")
-    # inspect_loader_range(validation_loader, "validation")
-    # inspect_loader_range(test_loader, "test")
-    scheduler = DDPM_Scheduler(num_time_steps=num_time_steps)
+    scheduler = DDPM_Scheduler(num_time_steps=base_config["num_time_steps"])
     sampling_scheduler = scheduler
 
     batch = next(iter(train_loader))
     image_channels = batch["gt"].shape[1]
     model_parts = build_models(
         image_channels=image_channels,
-        feature_channels=feature_channels,
-        num_time_steps=num_time_steps,
+        feature_channels=base_config["feature_channels"],
+        num_time_steps=base_config["num_time_steps"],
         device=device,
     )
     spatial_unet, spectral_unet, gated_fusion_pyramid, denoiser = model_parts
@@ -355,38 +423,48 @@ def main():
         + list(spectral_unet.parameters())
         + list(gated_fusion_pyramid.parameters())
         + list(denoiser.parameters()),
-        lr=learning_rate,
-        weight_decay=1e-4,
+        lr=base_config["learning_rate"],
+        weight_decay=base_config["weight_decay"],
     )
 
+    rows = []
     training_started_at = time.perf_counter()
 
-    for epoch in range(num_epochs):
+    for epoch in range(base_config["num_epochs"]):
+        current_epoch = epoch + 1
+        checkpoint_epoch = (
+            current_epoch % base_config["checkpoint_interval"] == 0
+            or current_epoch == base_config["num_epochs"]
+        )
+        epoch_sample_dir = sample_root / f"epoch_{current_epoch:04d}" if checkpoint_epoch else None
+
         train_metrics = train_one_epoch(
             train_loader=train_loader,
             scheduler=scheduler,
-            num_time_steps=num_time_steps,
+            num_time_steps=base_config["num_time_steps"],
             device=device,
             model_parts=model_parts,
             optimizer=optimizer,
-            max_batches=max_train_batches,
-            sample_dir=sample_dir,
+            max_batches=base_config["max_train_batches"],
+            sample_dir=None,
         )
         validation_metrics = validate_one_epoch(
             validation_loader=validation_loader,
             scheduler=sampling_scheduler,
-            num_time_steps=sampling_num_time_steps,
+            num_time_steps=base_config["sampling_num_time_steps"],
             device=device,
             model_parts=model_parts,
-            max_batches=max_validation_batches,
-            sample_dir=sample_dir,
+            max_batches=base_config["max_validation_batches"],
+            sample_dir=epoch_sample_dir,
         )
 
-        print_metrics(f"Epoch {epoch + 1}/{num_epochs} train", train_metrics)
-        print_metrics(f"Epoch {epoch + 1}/{num_epochs} valid", validation_metrics)
+        add_metrics_row(rows, dataset_name, dataset_name, "train", current_epoch, train_metrics)
+        add_metrics_row(rows, dataset_name, dataset_name, "valid", current_epoch, validation_metrics)
 
-        current_epoch = epoch + 1
-        if current_epoch % checkpoint_interval == 0:
+        print_metrics(f"{dataset_name} epoch {current_epoch}/{base_config['num_epochs']} train", train_metrics)
+        print_metrics(f"{dataset_name} epoch {current_epoch}/{base_config['num_epochs']} valid", validation_metrics)
+
+        if checkpoint_epoch:
             save_checkpoint(
                 checkpoint_dir=checkpoint_dir,
                 epoch=current_epoch,
@@ -397,22 +475,94 @@ def main():
                 config=config,
             )
 
-    test_metrics = test_one_epoch(
-        test_loader=test_loader,
-        scheduler=sampling_scheduler,
-        num_time_steps=sampling_num_time_steps,
-        device=device,
-        model_parts=model_parts,
-        max_batches=max_test_batches,
-        sample_dir=sample_dir,
-    )
-    print_metrics(f"Testing metrics", test_metrics)
+    for test_dataset_name in experiment["test_datasets"]:
+        test_loader = create_test_loader(
+            testing_dir=base_config["testing_dir"],
+            dataset_name=test_dataset_name,
+            batch_size=1,
+            shuffle=False,
+            num_workers=base_config["num_workers"],
+        )
+        test_sample_dir = sample_root / f"test_{test_dataset_name}"
+        test_metrics = test_one_epoch(
+            test_loader=test_loader,
+            scheduler=sampling_scheduler,
+            num_time_steps=base_config["sampling_num_time_steps"],
+            device=device,
+            model_parts=model_parts,
+            max_batches=base_config["max_test_batches"],
+            sample_dir=test_sample_dir,
+        )
+        add_metrics_row(
+            rows,
+            dataset_name,
+            test_dataset_name,
+            "test",
+            base_config["num_epochs"],
+            test_metrics,
+        )
+        print_metrics(f"{dataset_name} model test on {test_dataset_name}", test_metrics)
 
     if device.type == "cuda":
         torch.cuda.synchronize()
 
     training_duration = time.perf_counter() - training_started_at
-    print(f"Training lasted {format_duration(training_duration)}.")
+    print(f"{dataset_name} experiment lasted {format_duration(training_duration)}.")
+
+    metrics_path = results_dir / "metrics.csv"
+    write_metrics_table(rows, metrics_path)
+    print_results_table(rows, f"{dataset_name} results")
+    return rows
+
+
+def main():
+    set_seed(42)
+
+    base_config = {
+        "training_dir": "dataset/training",
+        "validation_dir": "dataset/validation",
+        "testing_dir": "dataset/testing",
+        "batch_size": 8,
+        "num_workers": 0,
+        "num_epochs": 100,
+        "num_time_steps": 200,
+        "sampling_num_time_steps": 200,
+        "feature_channels": (32, 64, 128),
+        "learning_rate": 2e-4,
+        "weight_decay": 1e-4,
+        "max_train_batches": None,
+        "max_validation_batches": None,
+        "max_test_batches": None,
+        "sample_dir": "workflow_samples",
+        "checkpoint_dir": "checkpoints",
+        "results_dir": "results",
+        "checkpoint_interval": 20,
+        "train_augmentation": True,
+    }
+
+    verify_required_datasets(
+        training_datasets=TRAINING_DATASETS,
+        training_dir=base_config["training_dir"],
+        validation_dir=base_config["validation_dir"],
+        testing_dir=base_config["testing_dir"],
+    )
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    all_rows = []
+    full_run_started_at = time.perf_counter()
+
+    for experiment in TRAINING_DATASETS:
+        rows = run_dataset_experiment(experiment, base_config, device)
+        all_rows.extend(rows)
+
+    write_metrics_table(all_rows, Path(base_config["results_dir"]) / "all_metrics.csv")
+    print_results_table(all_rows, "All experiment results")
+
+    if device.type == "cuda":
+        torch.cuda.synchronize()
+
+    full_run_duration = time.perf_counter() - full_run_started_at
+    print(f"Full multi-dataset run lasted {format_duration(full_run_duration)}.")
 
 
 if __name__ == "__main__":

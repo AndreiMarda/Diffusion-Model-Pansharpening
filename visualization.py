@@ -20,11 +20,11 @@ def _normalize(image):
     return ((image.clamp(low, high) - low) / (high - low)).clamp(0.0, 1.0)
 
 
-def _to_display_image(tensor):
+def _to_display_image(tensor, sample_index=0):
     image = tensor.detach().float().cpu()
 
     if image.ndim == 4:
-        image = image[0]
+        image = image[sample_index]
 
     if image.ndim == 3 and image.shape[0] == 1:
         return _normalize(image[0]), "gray"
@@ -39,15 +39,15 @@ def _to_display_image(tensor):
     return _normalize(image), "gray"
 
 
-def save_tensor_png(tensor, path):
+def save_tensor_png(tensor, path, sample_index=0):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    image, cmap = _to_display_image(tensor)
+    image, cmap = _to_display_image(tensor, sample_index=sample_index)
     plt.imsave(path, image.numpy(), cmap=cmap)
 
 
-def save_workflow_samples(outputs, output_dir, prefix):
+def save_workflow_samples(outputs, output_dir, prefix, sample_index=0):
     output_dir = Path(output_dir)
 
     keys = [
@@ -73,4 +73,8 @@ def save_workflow_samples(outputs, output_dir, prefix):
             target_size = outputs.get("pan", value).shape[-2:]
             value = F.interpolate(value, size=target_size, mode="nearest")
 
-        save_tensor_png(value, output_dir / f"{prefix}_{key}.png")
+        save_tensor_png(
+            value,
+            output_dir / f"{prefix}_{key}.png",
+            sample_index=sample_index,
+        )
