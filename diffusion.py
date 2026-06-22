@@ -1,11 +1,47 @@
 import torch
 import torch.nn.functional as F
+import numpy as np
 
 # epsilon == noise
 
-def bicubic_upsample(ms, size):
-    return F.interpolate(ms, size=size, mode="bicubic", align_corners=False)
+_CDF23_HALF = np.array([
+    0.5, 0.305334091185, 0, -0.072698593239, 0, 0.021809577942,
+    0,  -0.005192756653, 0,  0.000807762146, 0, -0.000060081482,
+])
+_CDF23_KERNEL = np.concatenate([_CDF23_HALF[::-1][:-1], 2.0 * _CDF23_HALF])
 
+
+
+def interp23(ms, ratio):
+    """Upsample ms (B,C,H,W) by an integer power-of-2 ratio using the
+    23-tap CDF 2/3 wavelet filter (Aiazzi et al. 2002)."""
+    if ratio < 1 or (ratio & (ratio - 1)) != 0:
+        raise ValueError(f"ratio must be a power of 2, got {ratio}")
+    if ratio == 1:
+        return ms
+    device, dtype = ms.device, ms.dtype
+    B, C, H, W = ms.shape
+    k   = torch.tensor(_CDF23_KERNEL, dtype=dtype, device=device)
+    K   = k.shape[0]
+    pad = K // 2
+    image = ms
+    for step in range(int(round(np.log2(ratio)))):
+        _, _, h, w = image.shape
+        BC = B * C
+        up = torch.zeros(BC, 1, h*2, w*2, dtype=dtype, device=device)
+        src = image.reshape(BC, 1, h, w)
+        if step == 0:
+            up[:, :, 1::2, 1::2] = src
+        else:
+            up[:, :, 0::2, 0::2] = src
+        k_r = k.view(1,1,1,K).expand(BC,1,1,K).contiguous()
+        k_c = k.view(1,1,K,1).expand(BC,1,K,1).contiguous()
+        x = F.pad(up, (pad,pad,0,0), mode="circular")
+        x = F.conv2d(x, k_r, groups=BC)
+        x = F.pad(x,  (0,0,pad,pad), mode="circular")
+        x = F.conv2d(x, k_c, groups=BC)
+        image = x.view(B, C, h*2, w*2)
+    return image
 
 def sample_timesteps(batch_size, num_time_steps, device):
     return torch.randint(0, num_time_steps, (batch_size,), device=device)

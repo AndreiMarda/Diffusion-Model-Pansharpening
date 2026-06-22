@@ -1,8 +1,15 @@
+"""
+Training and validation steps for multi-band pansharpening.
+
+Works with any number of spectral bands (4, 8, 11+).
+All operations are band-agnostic and scale automatically.
+"""
+
 import torch
 import torch.nn.functional as F
 
 from diffusion import (
-    bicubic_upsample,
+    interp23,
     predict_x0_from_eps,
     q_sample,
     reverse_diffusion_sample,
@@ -20,7 +27,7 @@ def prepare_forward_diffusion_batch(batch, scheduler, num_time_steps, device):
     if "lms" in batch:
         ms_up = batch["lms"].to(device)
     else:
-        ms_up = bicubic_upsample(ms, size=pan.shape[-2:])
+        ms_up = interp23(ms, ratio=pan.shape[-1] // ms.shape[-1])
 
     if ms_up.shape != gt.shape:
         raise ValueError(f"ms_up shape {ms_up.shape} does not match gt shape {gt.shape}")
@@ -189,7 +196,7 @@ def sample_hrms(
     if "lms" in batch:
         ms_up = batch["lms"].to(device)
     else:
-        ms_up = bicubic_upsample(ms, size=pan.shape[-2:])
+        ms_up = interp23(ms, ratio=pan.shape[-1] // ms.shape[-1])
 
     # Reverse Phase 2: Extract spatial and spectral conditioning features.
     spatial_feats = spatial_unet(pan)

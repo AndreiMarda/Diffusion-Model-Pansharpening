@@ -9,11 +9,17 @@ from torch.utils.data import DataLoader, Dataset
 class PanCollectionDataset(Dataset):
     """Lazy H5 dataset for pansharpening samples.
 
+    Supports any number of spectral bands (4, 8, 11, etc.).
+
     Returned tensors are channel-first float32:
-    pan: B x 1 x H x W
-    ms:  B x C x h x w
-    lms: B x C x H x W
-    gt:  B x C x H x W
+    pan: B x 1 x H x W           (panchromatic, always 1 band)
+    ms:  B x C x h x w           (multispectral, C = number of bands)
+    lms: B x C x H x W           (low-resolution MS upsampled to PAN resolution)
+    gt:  B x C x H x W           (ground truth high-resolution MS)
+
+    Example:
+        - 4-band data: C=4 for GF2, QB
+        - 8-band data: C=8 for WV3, WV2
     """
 
     def __init__(

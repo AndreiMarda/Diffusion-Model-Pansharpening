@@ -1,3 +1,20 @@
+"""
+Multi-band Pansharpening with Diffusion Models
+
+This code supports any number of spectral bands (4, 8, 11, etc.).
+The model architecture automatically adapts to the data's spectral dimensions:
+- Spatial UNet: Processes 1-band PAN image (panchromatic)
+- Spectral UNet: Processes N-band MS image (can be 4, 8, 11, or any number)
+- Gated Fusion Pyramid: Fuses spatial and spectral conditioning
+- Denoiser UNet: Generates high-resolution MS from noise (N bands)
+
+Currently configured for:
+- 4-band datasets: GF2, QB
+- 8-band datasets: WV3 (training/validation/testing), WV2 (testing)
+
+All components are band-agnostic and scale automatically to your data.
+"""
+
 import csv
 import time
 from pathlib import Path
@@ -45,17 +62,29 @@ TRAINING_DATASETS = (
 #             )
 
 def build_models(image_channels, feature_channels, num_time_steps, device):
+    """
+    Build model components. Works with any number of spectral bands.
+    
+    Args:
+        image_channels: Number of spectral bands (e.g., 4 for GF2/QB, 8 for WV3/WV2, 11 for WV3, etc.)
+        feature_channels: Tuple of feature dimensions at different scales
+        num_time_steps: Number of diffusion timesteps
+        device: Device to place models on
+    
+    Returns:
+        Tuple of (spatial_unet, spectral_unet, gated_fusion_pyramid, denoiser)
+    """
     spatial_unet = UNetFeatureExtractor(
-        in_channels=1,
+        in_channels=1,  # Always 1 for panchromatic
         feature_channels=feature_channels,
     ).to(device)
     spectral_unet = UNetFeatureExtractor(
-        in_channels=image_channels,
+        in_channels=image_channels,  # Adapts to number of spectral bands
         feature_channels=feature_channels,
     ).to(device)
     gated_fusion_pyramid = GatedFusionPyramid(feature_channels=feature_channels).to(device)
     denoiser = ConditionalDDPMUNet(
-        image_channels=image_channels,
+        image_channels=image_channels,  # Adapts to number of spectral bands
         feature_channels=feature_channels,
         num_time_steps=num_time_steps,
     ).to(device)
@@ -353,6 +382,8 @@ def print_results_table(rows, title):
 
 def verify_required_datasets(training_datasets, training_dir, validation_dir, testing_dir):
     missing = []
+    band_info = {}
+    
     for experiment in training_datasets:
         dataset_name = experiment["name"]
         required_files = [
@@ -376,6 +407,38 @@ def verify_required_datasets(training_datasets, training_dir, validation_dir, te
             "Cannot start the full multi-dataset run because required data is missing:\n"
             f"{missing_lines}"
         )
+    
+    # Verify number of bands in each dataset
+    print("\nVerifying dataset band counts:")
+    for experiment in training_datasets:
+        dataset_name = experiment["name"]
+        
+        # Check training data
+        train_path = Path(training_dir) / f"train_{dataset_name}.h5"
+        if train_path.exists():
+            try:
+                import h5py
+                with h5py.File(train_path, "r") as f:
+                    num_bands = f["gt"].shape[1]
+                    band_info[f"train_{dataset_name}"] = num_bands
+                    print(f"  train_{dataset_name}: {num_bands} bands")
+            except Exception as e:
+                print(f"  train_{dataset_name}: Could not determine bands - {e}")
+        
+        # Check test datasets
+        for test_dataset_name in experiment["test_datasets"]:
+            test_dir = Path(testing_dir) / test_dataset_name / "Full"
+            if test_dir.exists():
+                h5_files = list(test_dir.glob("*.h5"))
+                if h5_files:
+                    try:
+                        import h5py
+                        with h5py.File(h5_files[0], "r") as f:
+                            num_bands = f["ms"].shape[1]
+                            band_info[f"test_{test_dataset_name}"] = num_bands
+                            print(f"  test_{test_dataset_name}: {num_bands} bands")
+                    except Exception as e:
+                        print(f"  test_{test_dataset_name}: Could not determine bands - {e}")
 
 
 def run_dataset_experiment(experiment, base_config, device):
