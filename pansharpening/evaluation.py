@@ -1,6 +1,8 @@
 import torch
 import torch.nn.functional as F
 
+REFERENCE_METRIC_KEYS = ("psnr", "ssim", "scc", "sam", "ergas")
+
 # d_lambda Spectral Divergence (how well a pansharpened image preserves the spectral characteristics, from the MS)
 # d_s Spatial Divergence (how well a pansharpened image preserves the spatial characteristics, from the PAN)
 # QNR = (1 - d_lambda) * (1 - d_s)

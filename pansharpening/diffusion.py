@@ -75,11 +75,17 @@ def p_sample(x_t, t, denoiser, cond, scheduler):
 
 
 # this runs the full reverse diffusion process to generate a clean image from pure noise, given the denoiser and scheduler (iteratively, x_T->x_(T-1)->x_(T-2)->... x_0)
+# when snapshot_steps is given, also returns a {step: x_t} dict captured at those timesteps (plus the final x_0)
 @torch.no_grad()
-def reverse_diffusion_sample(shape, denoiser, cond, scheduler, num_time_steps, device):
+def reverse_diffusion_sample(shape, denoiser, cond, scheduler, num_time_steps, device, snapshot_steps=None):
     x_t = torch.randn(shape, device=device)
+    snapshot_targets = set(snapshot_steps) if snapshot_steps is not None else None
+    snapshots = {} if snapshot_steps is not None else None
 
     for step in reversed(range(num_time_steps)):
+        if snapshot_targets is not None and step in snapshot_targets:
+            snapshots[step] = x_t.clone()
+
         t = torch.full((shape[0],), step, device=device, dtype=torch.long)
         x_t = p_sample(
             x_t=x_t,
@@ -89,4 +95,9 @@ def reverse_diffusion_sample(shape, denoiser, cond, scheduler, num_time_steps, d
             scheduler=scheduler,
         )
 
+    if snapshot_targets is not None and 0 in snapshot_targets:
+        snapshots[0] = x_t.clone()
+
+    if snapshot_steps is not None:
+        return x_t, snapshots
     return x_t

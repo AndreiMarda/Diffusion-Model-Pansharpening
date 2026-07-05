@@ -47,6 +47,26 @@ def save_tensor_png(tensor, path, sample_index=0):
     plt.imsave(path, image.numpy(), cmap=cmap)
 
 
+def save_snapshot_grid(snapshots, path, sample_index=0):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    steps = sorted(snapshots.keys(), reverse=True)
+    fig, axes = plt.subplots(1, len(steps), figsize=(4 * len(steps), 4))
+    if len(steps) == 1:
+        axes = [axes]
+
+    for ax, step in zip(axes, steps):
+        image, cmap = _to_display_image(snapshots[step], sample_index=sample_index)
+        ax.imshow(image.numpy(), cmap=cmap)
+        ax.set_title(f"t={step}")
+        ax.axis("off")
+
+    fig.tight_layout()
+    fig.savefig(path)
+    plt.close(fig)
+
+
 def save_workflow_samples(outputs, output_dir, prefix, sample_index=0):
     output_dir = Path(output_dir)
 

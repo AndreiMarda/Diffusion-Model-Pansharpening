@@ -1,5 +1,4 @@
 import math
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -65,7 +64,6 @@ class TimeConditionedBlock(nn.Module):
 
 
 class ConditionalDDPMUNet(nn.Module):
-    """DDPM U-Net denoiser that predicts epsilon from x_t, timestep, and condition pyramid."""
 
     def __init__(
         self,

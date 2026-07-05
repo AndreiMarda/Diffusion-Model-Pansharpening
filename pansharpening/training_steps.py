@@ -1,21 +1,14 @@
-"""
-Training and validation steps for multi-band pansharpening.
-
-Works with any number of spectral bands (4, 8, 11+).
-All operations are band-agnostic and scale automatically.
-"""
-
 import torch
 import torch.nn.functional as F
 
-from diffusion import (
+from pansharpening.diffusion import (
     interp23,
     predict_x0_from_eps,
     q_sample,
     reverse_diffusion_sample,
     sample_timesteps,
 )
-from metrics import reference_metrics
+from pansharpening.evaluation import reference_metrics
 
 
 def prepare_forward_diffusion_batch(batch, scheduler, num_time_steps, device):
