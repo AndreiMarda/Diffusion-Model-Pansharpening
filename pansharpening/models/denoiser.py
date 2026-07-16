@@ -88,6 +88,7 @@ class ConditionalDDPMUNet(nn.Module):
 
         self.input_conv = nn.Conv2d(image_channels, c1, kernel_size=3, padding=1)
 
+        # Encoder
         self.enc1 = TimeConditionedBlock(c1, c1, time_dim, cond_channels=c1)
         self.down1 = nn.Conv2d(c1, c2, kernel_size=4, stride=2, padding=1)
         self.enc2 = TimeConditionedBlock(c2, c2, time_dim, cond_channels=c2)
@@ -95,9 +96,11 @@ class ConditionalDDPMUNet(nn.Module):
         self.enc3 = TimeConditionedBlock(c3, c3, time_dim, cond_channels=c3)
         self.down3 = nn.Conv2d(c3, c4, kernel_size=4, stride=2, padding=1)
 
+        # Bottleneck
         self.mid1 = TimeConditionedBlock(c4, c4, time_dim)
         self.mid2 = TimeConditionedBlock(c4, c4, time_dim)
 
+        # Decoder
         self.up3 = nn.ConvTranspose2d(c4, c3, kernel_size=4, stride=2, padding=1)
         self.dec3 = TimeConditionedBlock(c3 + c3, c3, time_dim, cond_channels=c3)
         self.up2 = nn.ConvTranspose2d(c3, c2, kernel_size=4, stride=2, padding=1)

@@ -53,11 +53,15 @@ class UNetFeatureExtractor(nn.Module):
         c1, c2, c3 = feature_channels
         bottleneck_channels = c3 * 2
 
+        # Encoder
         self.enc1 = ConvBlock(in_channels, c1)
         self.enc2 = DownBlock(c1, c2)
         self.enc3 = DownBlock(c2, c3)
+
+        # bottleneck
         self.bottleneck = DownBlock(c3, bottleneck_channels)
 
+        # Decoder
         self.dec3 = UpBlock(bottleneck_channels, c3, c3)
         self.dec2 = UpBlock(c3, c2, c2)
         self.dec1 = UpBlock(c2, c1, c1)
@@ -66,6 +70,7 @@ class UNetFeatureExtractor(nn.Module):
         enc1 = self.enc1(x)
         enc2 = self.enc2(enc1)
         enc3 = self.enc3(enc2)
+
         bottleneck = self.bottleneck(enc3)
 
         dec3 = self.dec3(bottleneck, enc3)

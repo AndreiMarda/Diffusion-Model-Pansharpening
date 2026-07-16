@@ -16,7 +16,7 @@ def prepare_forward_diffusion_batch(batch, scheduler, num_time_steps, device):
     ms = batch["ms"].to(device)
     gt = batch["gt"].to(device)
 
-    # Phase 1: Use dataset LMS when available, otherwise upsample MS to PAN/GT resolution.
+    #Use dataset LMS when available, otherwise upsample MS to PAN/GT resolution.
     if "lms" in batch:
         ms_up = batch["lms"].to(device)
     else:
@@ -25,14 +25,14 @@ def prepare_forward_diffusion_batch(batch, scheduler, num_time_steps, device):
     if ms_up.shape != gt.shape:
         raise ValueError(f"ms_up shape {ms_up.shape} does not match gt shape {gt.shape}")
 
-    # Phase 2: Compute residual/difference target.
+    #Compute residual/difference target.
     residual = gt - ms_up
 
-    # Phase 3: Sample timestep and Gaussian noise.
+    #Sample timestep and Gaussian noise.
     t = sample_timesteps(batch_size=pan.shape[0], num_time_steps=num_time_steps, device=device)
     noise = torch.randn_like(residual)
 
-    # Phase 4: Forward diffusion.
+    #Forward diffusion.
     x_t = q_sample(residual, t, noise, scheduler)
 
     return {
@@ -96,20 +96,20 @@ def compute_conditioned_losses(
     t = diffusion_batch["t"]
     noise = diffusion_batch["noise"]
 
-    # Phase 5: Condition extraction.
+    # extracting the features
     spatial_feats = spatial_unet(pan)
     spectral_feats = spectral_unet(ms_up)
 
-    # Phase 6: Gated fusion at all scales.
+    # Gated fusion at all scales
     cond = gated_fusion_pyramid(spatial_feats, spectral_feats)
 
-    # Phase 7: Denoising.
+    # Denoiser
     eps_pred = denoiser(x_t, t, cond)
 
-    # Phase 8: Main diffusion loss.
+    # Main diffusion loss.
     loss = F.mse_loss(eps_pred, noise)
 
-    # Phase 9: Reconstruct HRMS for a simple validation metric.
+    # Reconstruct HRMS for a simple validation metric.
     residual_pred = predict_x0_from_eps(x_t, t, eps_pred, scheduler)
     hrms_pred = ms_up + residual_pred
     recon_l1 = F.l1_loss(hrms_pred, gt)

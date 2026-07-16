@@ -31,12 +31,11 @@ def _check_same_shape(pred, target):
     if pred.shape != target.shape:
         raise ValueError(f"pred shape {pred.shape} does not match target shape {target.shape}")
 
-
+    # it normalizes images to [-1, 1]. Spectral metrics expect positive reflectance.
 def _to_reflectance(x, min_value=-1.0, data_range=2.0):
-    # The loaders normalize images to [-1, 1]. Spectral metrics expect positive radiance/reflectance.
     return (x - min_value) / data_range
 
-
+# used for scc function
 def _pearson_corr(x, y, eps=1e-8):
     x = x.flatten(start_dim=2)
     y = y.flatten(start_dim=2)
@@ -48,7 +47,7 @@ def _pearson_corr(x, y, eps=1e-8):
     denominator = torch.sqrt((x.pow(2).mean(dim=2) * y.pow(2).mean(dim=2)).clamp_min(eps))
     return numerator / denominator
 
-
+# high pass implemented for scc function
 def _high_pass(x):
     channels = x.shape[1]
     kernel = torch.tensor(
@@ -59,7 +58,7 @@ def _high_pass(x):
     kernel = kernel.expand(channels, 1, 3, 3)
     return F.conv2d(x, kernel, padding=1, groups=channels)
 
-
+# used inside the ssim function
 def _gaussian_window(window_size, sigma, channels, device, dtype):
     coords = torch.arange(window_size, device=device, dtype=dtype) - window_size // 2
     kernel_1d = torch.exp(-(coords ** 2) / (2.0 * sigma ** 2))
@@ -83,7 +82,6 @@ def ssim(pred, target, data_range=2.0, window_size=11, sigma=1.5, eps=1e-8):
 
     mu_pred = F.conv2d(pred, window, padding=padding, groups=channels)
     mu_target = F.conv2d(target, window, padding=padding, groups=channels)
-
     mu_pred_sq = mu_pred.pow(2)
     mu_target_sq = mu_target.pow(2)
     mu_pred_target = mu_pred * mu_target
@@ -127,7 +125,8 @@ def sam(pred, target, min_value=-1.0, data_range=2.0, degrees=True, eps=1e-8):
 
     return angle.mean()
 
-
+# For each spectral band, RMSE is computed between prediction and target
+# then normalize it by that band's average brightness
 def ergas(pred, target, scale_ratio=4.0, min_value=-1.0, data_range=2.0, eps=1e-8):
     _check_same_shape(pred, target)
 
@@ -155,7 +154,7 @@ def _q_index(x, y, eps=1e-8):
 
     numerator = 4.0 * cov_xy * mean_x * mean_y
     denominator = (var_x + var_y) * (mean_x ** 2 + mean_y ** 2)
-
+    # clamp_min -> any element below eps gets replaced with eps; anything greater than eps is left untouched
     return numerator / denominator.clamp_min(eps)
 
 
@@ -189,10 +188,9 @@ def spectral_distortion(hrms_pred, ms, p=1, eps=1e-8):
 
     return torch.stack(vals).mean().pow(1.0 / p).clamp(0.0, 1.0)
 
-
+# checks the PAN features to the predicted hrms
 def spatial_distortion(hrms_pred, ms, pan, q=1, eps=1e-8):
     # D_s: preserve relationship between each MS band and PAN.
-    # This is an approximation: ideally pan_lr should be produced by sensor-aware low-pass degradation.
     pan_lr = F.interpolate(
         pan,
         size=ms.shape[-2:],

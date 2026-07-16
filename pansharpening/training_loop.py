@@ -59,7 +59,6 @@ def train_one_epoch(
     device,
     model_parts,
     optimizer,
-    max_batches=None,
     sample_dir=None,
 ):
     spatial_unet, spectral_unet, gated_fusion_pyramid, denoiser = model_parts
@@ -69,8 +68,6 @@ def train_one_epoch(
     batch_count = 0
 
     for batch_index, batch in enumerate(train_loader):
-        if max_batches is not None and batch_index >= max_batches:
-            break
 
         outputs = run_training_step(
             batch=batch,
@@ -97,7 +94,6 @@ def validate_one_epoch(
     num_time_steps,
     device,
     model_parts,
-    max_batches=None,
     sample_dir=None,
 ):
     spatial_unet, spectral_unet, gated_fusion_pyramid, denoiser = model_parts
@@ -107,8 +103,6 @@ def validate_one_epoch(
     batch_count = 0
 
     for batch_index, batch in enumerate(validation_loader):
-        if max_batches is not None and batch_index >= max_batches:
-            break
 
         outputs = run_validation_step(
             batch=batch,
@@ -134,7 +128,6 @@ def test_one_epoch(
     num_time_steps,
     device,
     model_parts,
-    max_batches=None,
     sample_dir=None,
 ):
     spatial_unet, spectral_unet, gated_fusion_pyramid, denoiser = model_parts
@@ -151,8 +144,6 @@ def test_one_epoch(
 
     with torch.no_grad():
         for batch_index, batch in enumerate(test_loader):
-            if max_batches is not None and batch_index >= max_batches:
-                break
 
             outputs = sample_hrms(
                 batch=batch,
@@ -180,6 +171,67 @@ def test_one_epoch(
         averages["lms_l1"] = lms_total / lms_count
 
     return averages
+
+
+def test_one_epoch_repeated(
+    test_loader,
+    scheduler,
+    num_time_steps,
+    device,
+    model_parts,
+    num_repeats=5,
+):
+    # Unlike test_one_epoch (which averages one stochastic sample per image into a
+    # single dataset-level number), this returns one row per (image, run) so the
+    # caller can separate dataset variance from sampling variance during aggregation.
+    spatial_unet, spectral_unet, gated_fusion_pyramid, denoiser = model_parts
+    model_parts_eval(model_parts)
+
+    rows = []
+    with torch.no_grad():
+        for batch_index, batch in enumerate(test_loader):
+
+            for run_index in range(num_repeats):
+                if device.type == "cuda":
+                    torch.cuda.synchronize()
+                generation_started_at = time.perf_counter()
+
+                outputs = sample_hrms(
+                    batch=batch,
+                    scheduler=scheduler,
+                    num_time_steps=num_time_steps,
+                    device=device,
+                    spatial_unet=spatial_unet,
+                    spectral_unet=spectral_unet,
+                    gated_fusion_pyramid=gated_fusion_pyramid,
+                    denoiser=denoiser,
+                )
+
+                if device.type == "cuda":
+                    torch.cuda.synchronize()
+                generation_seconds = time.perf_counter() - generation_started_at
+
+                metrics = qnr_metrics(
+                    hrms_pred=outputs["hrms_pred"],
+                    ms=batch["ms"].to(device),
+                    pan=batch["pan"].to(device),
+                )
+
+                lms_l1 = None
+                if "lms" in batch:
+                    lms_l1 = F.l1_loss(outputs["hrms_pred"], batch["lms"].to(device)).item()
+
+                rows.append({
+                    "image_index": batch_index,
+                    "run_index": run_index,
+                    "qnr": metrics["qnr"].item(),
+                    "d_lambda": metrics["d_lambda"].item(),
+                    "d_s": metrics["d_s"].item(),
+                    "lms_l1": lms_l1,
+                    "generation_seconds": generation_seconds,
+                })
+
+    return rows
 
 
 def print_metrics(prefix, metrics):
@@ -320,7 +372,6 @@ def run_dataset_experiment(experiment, base_config, device):
         batch_size=base_config["batch_size"],
         shuffle=True,
         drop_last=True,
-        num_workers=base_config["num_workers"],
         augment=base_config["train_augmentation"],
     )
     validation_loader = create_validation_loader(
@@ -329,7 +380,6 @@ def run_dataset_experiment(experiment, base_config, device):
         batch_size=base_config["batch_size"],
         shuffle=False,
         drop_last=False,
-        num_workers=base_config["num_workers"],
     )
 
     scheduler = DDPM_Scheduler(num_time_steps=base_config["num_time_steps"])
@@ -372,7 +422,6 @@ def run_dataset_experiment(experiment, base_config, device):
             device=device,
             model_parts=model_parts,
             optimizer=optimizer,
-            max_batches=base_config["max_train_batches"],
             sample_dir=None,
         )
         validation_metrics = validate_one_epoch(
@@ -381,7 +430,6 @@ def run_dataset_experiment(experiment, base_config, device):
             num_time_steps=base_config["sampling_num_time_steps"],
             device=device,
             model_parts=model_parts,
-            max_batches=base_config["max_validation_batches"],
             sample_dir=epoch_sample_dir,
         )
 
@@ -408,7 +456,6 @@ def run_dataset_experiment(experiment, base_config, device):
             dataset_name=test_dataset_name,
             batch_size=1,
             shuffle=False,
-            num_workers=base_config["num_workers"],
         )
         test_sample_dir = sample_root / f"test_{test_dataset_name}"
         test_metrics = test_one_epoch(
@@ -417,7 +464,6 @@ def run_dataset_experiment(experiment, base_config, device):
             num_time_steps=base_config["sampling_num_time_steps"],
             device=device,
             model_parts=model_parts,
-            max_batches=base_config["max_test_batches"],
             sample_dir=test_sample_dir,
         )
         add_metrics_row(

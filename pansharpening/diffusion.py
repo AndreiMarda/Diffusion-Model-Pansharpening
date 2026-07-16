@@ -13,8 +13,7 @@ _CDF23_KERNEL = np.concatenate([_CDF23_HALF[::-1][:-1], 2.0 * _CDF23_HALF])
 
 
 def interp23(ms, ratio):
-    """Upsample ms (B,C,H,W) by an integer power-of-2 ratio using the
-    23-tap CDF 2/3 wavelet filter (Aiazzi et al. 2002)."""
+    """Upsample ms (B,C,H,W) by an integer power-of-2 ratio using the 23-tap"""
     if ratio < 1 or (ratio & (ratio - 1)) != 0:
         raise ValueError(f"ratio must be a power of 2, got {ratio}")
     if ratio == 1:
@@ -46,7 +45,7 @@ def interp23(ms, ratio):
 def sample_timesteps(batch_size, num_time_steps, device):
     return torch.randint(0, num_time_steps, (batch_size,), device=device)
 
-
+# forward diffusion (adds noise)
 def q_sample(x_start, t, noise, scheduler):
     alpha_bar_t = scheduler.alpha_bar.to(x_start.device)[t].view(-1, 1, 1, 1)
     return torch.sqrt(alpha_bar_t) * x_start + torch.sqrt(1.0 - alpha_bar_t) * noise

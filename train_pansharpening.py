@@ -13,10 +13,9 @@ from pansharpening.training_loop import (
 )
 
 TRAINING_DATASETS = (
-    # {"name": "gf2", "test_datasets": ("gf2",)},
-    # {"name": "qb", "test_datasets": ("qb",)},
+    {"name": "gf2", "test_datasets": ("gf2",)},
+    {"name": "qb", "test_datasets": ("qb",)},
     {"name": "wv3", "test_datasets": ("wv3", "wv2")},
-    # {"name": "wv3", "test_datasets": ("wv2")},
 )
 
 
@@ -28,16 +27,12 @@ def main():
         "validation_dir": "dataset/validation",
         "testing_dir": "dataset/testing",
         "batch_size": 8,
-        "num_workers": 0,
         "num_epochs": 100,
         "num_time_steps": 200,
         "sampling_num_time_steps": 200,
         "feature_channels": (32, 64, 128),
         "learning_rate": 2e-4,
         "weight_decay": 1e-4,
-        "max_train_batches": None,
-        "max_validation_batches": None,
-        "max_test_batches": None,
         "sample_dir": "workflow_samples",
         "checkpoint_dir": "checkpoints",
         "results_dir": "results",
